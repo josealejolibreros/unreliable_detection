@@ -16,7 +16,7 @@ warnings.filterwarnings("ignore")
 
 #Settings
 show_confusion_matrix_fig = False
-TEST_FILE = '2024-08-14_workunit_aggregation_all_tasks.csv' #place test file in test_data folder
+TEST_FILE = '2024-08-21-malicious_from_athena.csv' #place test file in test_data folder
 verbose = False
 
 BASE_DIR = os.path.dirname(os.path.realpath(__file__))
