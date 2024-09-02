@@ -16,7 +16,7 @@ warnings.filterwarnings("ignore")
 
 #Settings
 show_confusion_matrix_fig = False
-TEST_FILE = 'suspicious_workers_noventi_dates_2024-08-28.csv' #place test file in test_data folder
+TEST_FILE = 'suspicious_workers_noventi_dates_2024-09-02.csv' #place test file in test_data folder
 verbose = False
 
 BASE_DIR = os.path.dirname(os.path.realpath(__file__))
@@ -130,7 +130,7 @@ df = merge_datasets_training(BASE_DIR + '/training_data/', verbose=verbose)
 
 
 df = workunit_types(df, verbose=verbose)
-df = df.drop(columns= ['worker_id', 'workunit_id', 'start_datetime', 'source', 'session_id', 'reason', 'recording_id', 'job_id', 'step'])
+df = df.drop(columns= ['workunit_id', 'recording_id', 'step_id'])
 
 label_encoders = {}
 non_numeric_columns = df.select_dtypes(exclude=['number']).columns
