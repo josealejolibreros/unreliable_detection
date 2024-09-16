@@ -16,7 +16,7 @@ warnings.filterwarnings("ignore")
 
 #Settings
 show_confusion_matrix_fig = False
-TEST_FILE = 'suspicious_workers_noventi_dates_2024-09-02.csv' #place test file in test_data folder
+TEST_FILE = '2024-09-16_aggregation_all.csv' #place test file in test_data folder
 verbose = False
 
 BASE_DIR = os.path.dirname(os.path.realpath(__file__))
@@ -279,8 +279,10 @@ new_data_df = pd.concat([new_data_df,results_df,recording_ids], axis=1)
 
 new_data_df_095 = new_data_df[new_data_df['Confidence']>=0.95] 
 new_data_df_unrel = new_data_df[new_data_df['Prediction']=='Unreliable'] 
+new_data_df_50 = new_data_df.sample(n=50, random_state=1)
 
 
 new_data_df.to_csv(BASE_DIR + '/predictions/' + filename_without_format + '_predictions_ALL.csv', index=False)
 new_data_df_095.to_csv(BASE_DIR + '/predictions/' + filename_without_format + '_predictions_g095.csv', index=False)
 new_data_df_unrel.to_csv(BASE_DIR + '/predictions/' + filename_without_format + '_predictions_unrel.csv', index=False)
+new_data_df_50.to_csv(BASE_DIR + '/predictions/' + filename_without_format + '_predictions_50.csv', index=False)
