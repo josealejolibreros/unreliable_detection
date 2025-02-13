@@ -26,6 +26,10 @@ BASE_TEST = BASE_DIR + '/test_data/'
 PATH_MODEL = BASE_DIR + '/saved_models/model.model'
 file_path_new_data_test = BASE_TEST + TEST_FILE
 
+partial = True
+resume_training = True
+training_from_scratch = False
+
 
 # Function to merge datasets from a directory, but only one file
 def merge_datasets_training(directory, verbose=verbose):
@@ -229,6 +233,12 @@ for train_idx, test_idx in kf.split(X, y):
     criterion = nn.CrossEntropyLoss(class_weights)
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=0.0001)
+
+    ##New: loading state
+    if partial:
+        pass
+        #model.load_state_dict(torch.load(PATH_MODEL))
+        #optimizer.load_state_dict(PATH_MODEL)
 
     # Training
     num_epochs = 500 #100 is too low, 400 too much, after tests 150 is ok
