@@ -23,6 +23,7 @@ verbose = False
 BASE_DIR = os.path.dirname(os.path.realpath(__file__))
 filename_without_format = TEST_FILE.replace('.csv', '')
 BASE_TEST = BASE_DIR + '/test_data/'
+PATH_MODEL = BASE_DIR + '/saved_models/model.model'
 file_path_new_data_test = BASE_TEST + TEST_FILE
 
 
@@ -226,18 +227,29 @@ for train_idx, test_idx in kf.split(X, y):
     class_weights = torch.tensor([1.4, 3.52], dtype=torch.float32) #necessary for giving more weight for unreliable
     class_weights = torch.tensor([0.5, 10], dtype=torch.float32) #necessary for giving more weight for unreliable
     criterion = nn.CrossEntropyLoss(class_weights)
-    #criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters(), lr=0.001)
+    criterion = nn.CrossEntropyLoss()
+    optimizer = optim.Adam(model.parameters(), lr=0.0001)
 
     # Training
-    num_epochs = 150 #100 is too low, 400 too much, after tests 150 is ok
+    num_epochs = 500 #100 is too low, 400 too much, after tests 150 is ok
+    train_losses = []
+    test_losses = [] 
+
     for epoch in range(num_epochs):
         model.train()
         optimizer.zero_grad()
         outputs = model(X_train_tensor)
         loss = criterion(outputs, y_train_tensor)
+        train_losses.append(loss.item())  
         loss.backward()
         optimizer.step()
+
+        # Evaluation phase
+        model.eval()
+        with torch.no_grad():
+            outputs = model(X_test_tensor)
+            test_loss = criterion(outputs, y_test_tensor)
+            test_losses.append(test_loss.item())  # Guardar la pérdida de prueba
 
     # Evaluation
     model.eval()
@@ -261,6 +273,16 @@ for train_idx, test_idx in kf.split(X, y):
 
 # Print overall performance
 print(f"Average Accuracy: {accuracies}, mean: {np.mean(accuracies):.4f} std: {np.std(accuracies):.4f}")
+
+plt.plot(range(1, num_epochs + 1), train_losses, label="Training Loss")
+plt.plot(range(1, num_epochs + 1), test_losses, label="Test Loss")
+plt.xlabel("Epoch")
+plt.ylabel("Loss")
+plt.title("Training and Test Loss per Epoch")
+plt.legend()
+plt.grid()
+plt.show()
+torch.save(model.state_dict(), PATH_MODEL)
 
 
 all_files_test_newdata = [(os.path.join(BASE_TEST, f), f) for f in os.listdir(BASE_TEST) if f.endswith('.csv')]
