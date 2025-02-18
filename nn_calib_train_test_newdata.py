@@ -12,6 +12,8 @@ import os
 import warnings
 from sklearn.calibration import calibration_curve
 import numpy as np
+import joblib
+import json
 
 warnings.filterwarnings("ignore")
 
@@ -23,12 +25,21 @@ verbose = False
 BASE_DIR = os.path.dirname(os.path.realpath(__file__))
 filename_without_format = TEST_FILE.replace('.csv', '')
 BASE_TEST = BASE_DIR + '/test_data/'
-PATH_MODEL = BASE_DIR + '/saved_models/model.model'
+PATH_SAVED_MODELS = BASE_DIR + '/saved_models/'
+PATH_MODEL = PATH_SAVED_MODELS + 'model.pb'
+PATH_MODEL_PARAMS = PATH_SAVED_MODELS + 'statedict.model'
+PATH_BINS = PATH_SAVED_MODELS + 'bins.npz'
+PATH_SCALER = PATH_SAVED_MODELS + 'scaler.gz'
+PATH_LABEL_ENCODERS = PATH_SAVED_MODELS + 'label_encoder.gz'
+PATH_LABEL_OTHERPARAMS = PATH_SAVED_MODELS + 'params.json'
 file_path_new_data_test = BASE_TEST + TEST_FILE
 
-partial = True
 resume_training = True
-training_from_scratch = False
+only_use = True
+
+#Model architecture
+hidden_size1 = 32
+hidden_size2 = 16
 
 
 # Function to merge datasets from a directory, but only one file
@@ -97,11 +108,15 @@ def depure_and_divide_data(df, verbose=verbose):
         print("Number columns train", len(columns_df_original))
         print(columns_df_original)
 
+    joblib.dump(label_encoders, PATH_LABEL_ENCODERS)
+    with open(PATH_LABEL_OTHERPARAMS, "w") as f:
+        json.dump({"columns_df_original": columns_df_original}, f)
+
     return X, y, columns_df_original, label_encoders
 
 
 # Histogram binning implementation for calibration
-def histogram_binning_calibration(y_true, y_pred_proba, bins=10):
+def histogram_binning_calibration(y_true, y_pred_proba, bins=10, save = True):
     """
     Calibrar las probabilidades utilizando Histogram Binning.
     """
@@ -123,7 +138,10 @@ def histogram_binning_calibration(y_true, y_pred_proba, bins=10):
         y_pred_calibrated[bin_mask] = bin_true_prob[b - 1]
 
     bin_weight = bin_count / len(y_true)
-    
+
+    if save:
+        np.savez(PATH_BINS, bin_edges=bin_edges, bin_true_prob=bin_true_prob, bin_weight=bin_weight)
+
     return y_pred_calibrated, bin_edges, bin_true_prob, bin_weight
 
 
@@ -194,107 +212,110 @@ class NeuralNetwork(nn.Module):
         out = self.fc3(out)
         return out
 
+if not only_use:
 
-# Training data location dir
-df = merge_datasets_training(BASE_DIR + '/training_data_compiled/', verbose=verbose)
+    # Training data location dir
+    df = merge_datasets_training(BASE_DIR + '/training_data_compiled/', verbose=verbose)
 
-X, y, columns_df_original, label_encoders = depure_and_divide_data(df)
+    X, y, columns_df_original, label_encoders = depure_and_divide_data(df)
 
-# Stratified K-Fold cross-validation
-kf = StratifiedKFold(n_splits=5)
-accuracies = []
-calibration_results = []
+    # Stratified K-Fold cross-validation
+    kf = StratifiedKFold(n_splits=5)
+    accuracies = []
+    calibration_results = []
 
-for train_idx, test_idx in kf.split(X, y):
-    X_train, X_test = X[train_idx], X[test_idx]
-    y_train, y_test = y[train_idx], y[test_idx]
-    
-    # Normalization
-    scaler = StandardScaler()
-    X_train_scaled = scaler.fit_transform(X_train)
-    X_test_scaled = scaler.transform(X_test)
+    for train_idx, test_idx in kf.split(X, y):
+        X_train, X_test = X[train_idx], X[test_idx]
+        y_train, y_test = y[train_idx], y[test_idx]
+        
+        # Normalization
+        scaler = StandardScaler()
+        X_train_scaled = scaler.fit_transform(X_train)
+        
+        X_test_scaled = scaler.transform(X_test)
+        joblib.dump(scaler, PATH_SCALER)
 
-    # Conversion to PyTorch tensors
-    X_train_tensor = torch.tensor(X_train_scaled, dtype=torch.float32)
-    y_train_tensor = torch.tensor(y_train, dtype=torch.long)
-    X_test_tensor = torch.tensor(X_test_scaled, dtype=torch.float32)
-    y_test_tensor = torch.tensor(y_test, dtype=torch.long)
+        # Conversion to PyTorch tensors
+        X_train_tensor = torch.tensor(X_train_scaled, dtype=torch.float32)
+        y_train_tensor = torch.tensor(y_train, dtype=torch.long)
+        X_test_tensor = torch.tensor(X_test_scaled, dtype=torch.float32)
+        y_test_tensor = torch.tensor(y_test, dtype=torch.long)
 
-    # Model
-    input_size = X_train.shape[1]
-    hidden_size1 = 32
-    hidden_size2 = 16
-    output_size = len(np.unique(y_train))
-    model = NeuralNetwork(input_size, hidden_size1, hidden_size2, output_size)
-    
-    # Class weights (for reliable and unreliable classes)
-    class_weights = torch.tensor([1.4, 3.52], dtype=torch.float32) #necessary for giving more weight for unreliable
-    class_weights = torch.tensor([0.5, 10], dtype=torch.float32) #necessary for giving more weight for unreliable
-    criterion = nn.CrossEntropyLoss(class_weights)
-    criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters(), lr=0.0001)
+        # Model
+        input_size = X_train.shape[1]
+        hidden_size1 = hidden_size1
+        hidden_size2 = hidden_size2
+        output_size = len(np.unique(y_train))
+        model = NeuralNetwork(input_size, hidden_size1, hidden_size2, output_size)
+        
+        # Class weights (for reliable and unreliable classes)
+        class_weights = torch.tensor([1.4, 3.52], dtype=torch.float32) #necessary for giving more weight for unreliable
+        class_weights = torch.tensor([0.5, 10], dtype=torch.float32) #necessary for giving more weight for unreliable
+        criterion = nn.CrossEntropyLoss(class_weights)
+        criterion = nn.CrossEntropyLoss()
+        optimizer = optim.Adam(model.parameters(), lr=0.0001)
 
-    ##New: loading state
-    if partial:
-        pass
-        #model.load_state_dict(torch.load(PATH_MODEL))
-        #optimizer.load_state_dict(PATH_MODEL)
+        ##New: loading state
+        if resume_training:
+            #pass
+            model.load_state_dict(torch.load(PATH_MODEL_PARAMS))
+            #optimizer.load_state_dict(PATH_MODEL)
 
-    # Training
-    num_epochs = 500 #100 is too low, 400 too much, after tests 150 is ok
-    train_losses = []
-    test_losses = [] 
+        # Training
+        num_epochs = 600 #100 is too low, 400 too much, after tests 150 is ok
+        train_losses = []
+        test_losses = [] 
 
-    for epoch in range(num_epochs):
-        model.train()
-        optimizer.zero_grad()
-        outputs = model(X_train_tensor)
-        loss = criterion(outputs, y_train_tensor)
-        train_losses.append(loss.item())  
-        loss.backward()
-        optimizer.step()
+        for epoch in range(num_epochs):
+            model.train()
+            optimizer.zero_grad()
+            outputs = model(X_train_tensor)
+            loss = criterion(outputs, y_train_tensor)
+            train_losses.append(loss.item())  
+            loss.backward()
+            optimizer.step()
 
-        # Evaluation phase
+            # Evaluation phase
+            model.eval()
+            with torch.no_grad():
+                outputs = model(X_test_tensor)
+                test_loss = criterion(outputs, y_test_tensor)
+                test_losses.append(test_loss.item())  # Guardar la pérdida de prueba
+
+        # Evaluation
         model.eval()
         with torch.no_grad():
             outputs = model(X_test_tensor)
-            test_loss = criterion(outputs, y_test_tensor)
-            test_losses.append(test_loss.item())  # Guardar la pérdida de prueba
+            probabilities = torch.softmax(outputs, dim=1).numpy()
+            _, predicted = torch.max(outputs, 1)
+            accuracy = accuracy_score(y_test_tensor, predicted.numpy())
+            accuracies.append(accuracy)
 
-    # Evaluation
-    model.eval()
-    with torch.no_grad():
-        outputs = model(X_test_tensor)
-        probabilities = torch.softmax(outputs, dim=1).numpy()
-        _, predicted = torch.max(outputs, 1)
-        accuracy = accuracy_score(y_test_tensor, predicted.numpy())
-        accuracies.append(accuracy)
+            y_pred_proba = probabilities[:, 1]  # For binary classification
 
-        y_pred_proba = probabilities[:, 1]  # For binary classification
+            # Calibration using histogram binning
+            y_pred_calibrated, bin_edges, bin_true_prob, bin_weight = histogram_binning_calibration(y_test, y_pred_proba)
 
-        # Calibration using histogram binning
-        y_pred_calibrated, bin_edges, bin_true_prob, bin_weight = histogram_binning_calibration(y_test, y_pred_proba)
+            # Store calibration results
+            calibration_results.append((y_test, y_pred_proba, y_pred_calibrated))
 
-        # Store calibration results
-        calibration_results.append((y_test, y_pred_proba, y_pred_calibrated))
+            # Reliability diagram
+            #plot_reliability_diagram(y_test, y_pred_proba, y_pred_calibrated)
 
-        # Reliability diagram
-        #plot_reliability_diagram(y_test, y_pred_proba, y_pred_calibrated)
+    # Print overall performance
+    print(f"Average Accuracy: {accuracies}, mean: {np.mean(accuracies):.4f} std: {np.std(accuracies):.4f}")
 
-# Print overall performance
-print(f"Average Accuracy: {accuracies}, mean: {np.mean(accuracies):.4f} std: {np.std(accuracies):.4f}")
-
-plt.plot(range(1, num_epochs + 1), train_losses, label="Training Loss")
-plt.plot(range(1, num_epochs + 1), test_losses, label="Test Loss")
-plt.xlabel("Epoch")
-plt.ylabel("Loss")
-plt.title("Training and Test Loss per Epoch")
-plt.legend()
-plt.grid()
-plt.show()
-torch.save(model.state_dict(), PATH_MODEL)
-
-
+    plt.plot(range(1, num_epochs + 1), train_losses, label="Training Loss")
+    plt.plot(range(1, num_epochs + 1), test_losses, label="Test Loss")
+    plt.xlabel("Epoch")
+    plt.ylabel("Loss")
+    plt.title("Training and Test Loss per Epoch")
+    plt.legend()
+    plt.grid()
+    plt.show()
+    torch.save(model.state_dict(), PATH_MODEL_PARAMS)
+    torch.save(model, PATH_MODEL)
+    
 all_files_test_newdata = [(os.path.join(BASE_TEST, f), f) for f in os.listdir(BASE_TEST) if f.endswith('.csv')]
 print("with new data - to inference")
 for path_filename_test_newdata, filename_test_newdata in all_files_test_newdata:
@@ -304,10 +325,37 @@ for path_filename_test_newdata, filename_test_newdata in all_files_test_newdata:
     #  With new data - to inference  #
     ##################################
     
+    if only_use:
+        #when importing the params only, it must explicitly define the model architecture,
+        #do torch.load(PATH_MODEL_PARAMS)
+        #define model architecture
+                #input_size = X_train.shape[1]
+                #hidden_size1 = hidden_size1
+                #hidden_size2 = hidden_size2
+                #output_size = len(np.unique(y_train))
+                #model = NeuralNetwork(input_size, hidden_size1, hidden_size2, output_size)
+                #model.load_state_dict(torch.load(PATH_MODEL))
+        model = torch.load(PATH_MODEL)
+
+        #loading bins
+        loaded = np.load(PATH_BINS)
+        bin_edges = loaded["bin_edges"]
+        bin_true_prob = loaded["bin_true_prob"]
+        bin_weight = loaded["bin_weight"]
+
+        #loading scaler
+        scaler = joblib.load(PATH_SCALER)
+
+        #loading label encoders
+        label_encoders = joblib.load(PATH_LABEL_ENCODERS)
+
+        #loading other params 
+        with open(PATH_LABEL_OTHERPARAMS, "r") as f:
+            loaded_data = json.load(f)
+            columns_df_original = loaded_data['columns_df_original']
 
     ######new data
     new_data_df = pd.read_csv(path_filename_test_newdata)
-
     classes_available = False
     if 'class' in new_data_df.columns.to_list():        
         classes_available = True
@@ -335,8 +383,9 @@ for path_filename_test_newdata, filename_test_newdata in all_files_test_newdata:
         #print(new_data_df.columns.to_list())
         print(one_not_two)
 
+    
+    
     new_data_scaled = scaler.transform(new_data_df)
-
 
     new_data_tensor = torch.tensor(new_data_scaled, dtype=torch.float32)
 
