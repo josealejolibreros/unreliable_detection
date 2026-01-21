@@ -1,4 +1,6 @@
 import os
+os.environ["HSA_OVERRIDE_GFX_VERSION"] = "10.3.0"
+
 import warnings
 import json
 import joblib
@@ -16,6 +18,7 @@ from sklearn.metrics import roc_curve, auc
 warnings.filterwarnings("ignore")
 import concurrent.futures
 import torch.multiprocessing as mp
+import random
 
 # =====================
 # Configuración de GPU
@@ -37,7 +40,30 @@ learning_rate = 0.0001
 hidden_size1 = 32
 hidden_size2 = 16
 
-torch.manual_seed(0)
+######
+#preserve determinism (at least as far as it works)
+######
+
+SEED = 41
+
+#Python
+random.seed(SEED)
+
+#Numpy
+np.random.seed(SEED)
+
+#PyTorch CPU
+torch.manual_seed(SEED)
+
+#PyTorch GPU
+torch.cuda.manual_seed(SEED)
+torch.cuda.manual_seed_all(SEED)
+
+torch.backends.cudnn.deterministic = True
+torch.backends.cudnn.benchmark = False
+###
+#end preserve determinism
+###
 
 INCLUDE_TIME_IN_SIMULATION = True
 USE_RNN = False
@@ -185,7 +211,7 @@ class NeuralNetwork(nn.Module):
         self.activation = activation
         self.fc2 = nn.Linear(hidden_size1, hidden_size2)
         self.fc3 = nn.Linear(hidden_size2, output_size)
-        self.dropout = nn.Dropout(p=0.001)
+        self.dropout = nn.Dropout(p=0.6)
     def forward(self, x):
         out = self.fc1(x)
         out = self.dropout(self.activation(out))
@@ -202,7 +228,7 @@ class TimeSeriesModel(nn.Module):
         self.activation = activation
         self.fc2 = nn.Linear(hidden_size_fc1, hidden_size_fc2)
         self.fc3 = nn.Linear(hidden_size_fc2, output_size)
-        self.dropout = nn.Dropout(p=0.2)
+        self.dropout = nn.Dropout(p=0.6)
     def forward(self, x):
         out, _ = self.lstm(x)
         out = out[:, -1, :]
@@ -242,7 +268,7 @@ def balance_classes(X_train, X_test, y_train, y_test, random_state=42):
 def stratified_split_with_retry(X, y, test_size, min_ratio, max_retries=1000):
     for _ in range(max_retries):
         X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=test_size, stratify=y, random_state=np.random.randint(10000)
+            X, y, test_size=test_size, stratify=y, random_state=np.random.randint(SEED)
         )
         unique_classes, counts = np.unique(y_train, return_counts=True)
         min_required = np.ceil(len(y_train) * min_ratio).astype(int)
@@ -253,7 +279,7 @@ def stratified_split_with_retry(X, y, test_size, min_ratio, max_retries=1000):
 def apply_smote_to_minority(X_train, y_train):
     unique_classes, counts = np.unique(y_train, return_counts=True)
     min_class = unique_classes[np.argmin(counts)]
-    smote = SMOTE(sampling_strategy={min_class: int(np.median(counts))}, random_state=42)
+    smote = SMOTE(sampling_strategy={min_class: int(np.median(counts))}, random_state=SEED)
     return smote.fit_resample(X_train, y_train)
 
 # --------------------------
@@ -383,6 +409,7 @@ def process_column(column_name_to_delete, df, n_simulations, activation_name, ac
     X, y, columns_df_original, label_encoders = depure_and_divide_data(df, verbose=False, column_name_to_delete=column_name_to_delete)
     metrics_list = []
     for sim in range(n_simulations):
+        set_all_seeds(SEED + sim)
         print(f"Simulation # {sim+1}/{n_simulations} for {column_name_to_delete} for {activation_name}")
         precision, recall, accuracy, f1 = run_simulation(X, y, columns_df_original, label_encoders, activation_name, activation_function)
         metrics_list.append((precision, recall, accuracy, f1))
@@ -392,6 +419,13 @@ def process_column(column_name_to_delete, df, n_simulations, activation_name, ac
     np.savetxt(OUTPUT_FILENAME+"_"+activation_name+".csv", metrics_list, delimiter=',', header=header, comments='')
     #plot_metrics(metrics_list, column_name_to_delete)
     return (column_name_to_delete, n, mean_precision, mean_recall, mean_accuracy, mean_f1)
+
+def set_all_seeds(seed):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
 
 def main():
     df = pd.read_csv(DATA_FILE)
